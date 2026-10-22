@@ -1,0 +1,4 @@
+/target
+/config.json
+*.swp
+.DS_Store

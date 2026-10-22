@@ -1,0 +1,33 @@
+[Unit]
+Description=my-ids file integrity monitor
+Documentation=https://github.com/alphingj/RPI-AIDE
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/my-ids --config /etc/my-ids/config.json --serve
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=15s
+
+User=root
+Group=root
+UMask=0077
+StateDirectory=my-ids
+StateDirectoryMode=0700
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+SyslogIdentifier=my-ids
+
+[Install]
+WantedBy=multi-user.target
