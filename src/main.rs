@@ -104,6 +104,10 @@ impl Default for Config {
                 "/etc/pihole/pihole-FTL.db",
                 "/etc/pihole/pihole-FTL.db-wal",
                 "/etc/pihole/pihole-FTL.db-shm",
+                "/etc/pihole/gravity.db",
+                "/etc/pihole/gravity.db-wal",
+                "/etc/pihole/gravity.db-shm",
+                "/etc/pihole/gravity_old.db",
                 "/var/log",
                 "/var/cache",
                 "/var/tmp",
@@ -2254,5 +2258,24 @@ mod tests {
         assert!(path_is_within("/etc/passwd", "/"));
         assert!(!path_is_within("/srv2/a", "/srv"));
         assert!(!path_is_within("/etc", "/etc/passwd"));
+    }
+
+    #[test]
+    fn default_excludes_pihole_databases() {
+        let excludes = Config::default().exclude;
+        for path in [
+            "/etc/pihole/pihole-FTL.db",
+            "/etc/pihole/pihole-FTL.db-wal",
+            "/etc/pihole/pihole-FTL.db-shm",
+            "/etc/pihole/gravity.db",
+            "/etc/pihole/gravity.db-wal",
+            "/etc/pihole/gravity.db-shm",
+            "/etc/pihole/gravity_old.db",
+        ] {
+            assert!(
+                is_excluded(Path::new(path), &excludes),
+                "default excludes must include {path}"
+            );
+        }
     }
 }

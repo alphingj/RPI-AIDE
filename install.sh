@@ -279,6 +279,10 @@ else
     "/etc/pihole/pihole-FTL.db"
     "/etc/pihole/pihole-FTL.db-wal"
     "/etc/pihole/pihole-FTL.db-shm"
+    "/etc/pihole/gravity.db"
+    "/etc/pihole/gravity.db-wal"
+    "/etc/pihole/gravity.db-shm"
+    "/etc/pihole/gravity_old.db"
     "/var/log"
     "/var/cache"
     "/var/tmp"
@@ -322,7 +326,11 @@ fi
 
 install -d -m 0755 "$(dirname "$SETUP_PATH")"
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
-  install -m 0755 "${BASH_SOURCE[0]}" "$SETUP_PATH"
+  if [ -e "$SETUP_PATH" ] && [ "$(readlink -f "${BASH_SOURCE[0]}")" = "$(readlink -f "$SETUP_PATH")" ]; then
+    say "Setup script is already in place."
+  else
+    install -m 0755 "${BASH_SOURCE[0]}" "$SETUP_PATH"
+  fi
 else
   if [ "$VERSION" = "latest" ]; then
     SETUP_URL="https://raw.githubusercontent.com/$REPO/main/install.sh"
@@ -435,7 +443,8 @@ fi
 
 if [ "$INIT_STATUS" -eq 1 ]; then
   warn "the baseline was written but some paths could not be scanned"
-  warn "review the output, fix access, then run: $BIN_PATH --config $CONFIG --init --force"
+  warn "for unreadable paths, fix permissions; for large files, add them to exclude or raise max_file_bytes"
+  warn "then rebuild with: $BIN_PATH --config $CONFIG --init --force"
 elif [ "$INIT_STATUS" -gt 1 ]; then
   warn "the baseline was not created (exit $INIT_STATUS)"
 fi
