@@ -108,6 +108,7 @@ impl Default for Config {
                 "/etc/pihole/gravity.db-wal",
                 "/etc/pihole/gravity.db-shm",
                 "/etc/pihole/gravity_old.db",
+                "/etc/rpi-aide",
                 "/var/log",
                 "/var/cache",
                 "/var/tmp",
@@ -2271,6 +2272,7 @@ mod tests {
             "/etc/pihole/gravity.db-wal",
             "/etc/pihole/gravity.db-shm",
             "/etc/pihole/gravity_old.db",
+            "/etc/rpi-aide",
         ] {
             assert!(
                 is_excluded(Path::new(path), &excludes),

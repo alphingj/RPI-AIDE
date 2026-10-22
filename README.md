@@ -134,9 +134,9 @@ The one-command installer is the setup wizard. It asks for:
 3. The maximum file size to hash. The default is 256 MB.
 
 It writes `config.json` with mode `0600`, creates `/var/lib/rpi-aide` with mode `0700`,
-excludes the Pi-hole databases and volatile paths, creates the baseline, installs the
-systemd unit, and starts the service. If the baseline has scan errors, the installer says
-so and exits non-zero.
+excludes the Pi-hole databases, its own config directory, and volatile paths, creates the
+baseline, installs the systemd unit, and starts the service. If the baseline has scan errors,
+the installer says so and exits non-zero.
 
 For unattended setup, `--yes` accepts the defaults. The environment variables
 `RPI_AIDE_ROOTS`, `RPI_AIDE_BIND`, and `RPI_AIDE_MAX_MB` override the prompt defaults.
@@ -208,6 +208,7 @@ while root looks in `/etc/rpi-aide/config.json`.
     "/etc/pihole/gravity.db-wal",
     "/etc/pihole/gravity.db-shm",
     "/etc/pihole/gravity_old.db",
+    "/etc/rpi-aide",
     "/var/log",
     "/var/cache",
     "/var/tmp",

@@ -283,6 +283,7 @@ else
     "/etc/pihole/gravity.db-wal"
     "/etc/pihole/gravity.db-shm"
     "/etc/pihole/gravity_old.db"
+    "${PREFIX%/}/etc/rpi-aide"
     "/var/log"
     "/var/cache"
     "/var/tmp"
@@ -344,39 +345,12 @@ else
   fi
 fi
 
-INIT_STATUS=0
-if [ "$NO_INIT" -eq 0 ]; then
-  if [ -f "$STATE_DIR/baseline.json" ]; then
-    if [ "$CONFIG_EXISTS" -eq 0 ] || [ "$RECONFIGURE" -eq 1 ]; then
-      if confirm "Replace the existing baseline with a fresh scan?" "y"; then
-        if "$BIN_PATH" --config "$CONFIG" --init --force; then
-          INIT_STATUS=0
-        else
-          INIT_STATUS=$?
-        fi
-      else
-        warn "baseline not replaced; the dashboard will report a mismatch until you run --init --force"
-      fi
-    else
-      say "Keeping the existing baseline."
-    fi
-  else
-    if confirm "Create the initial baseline now? This can take a while." "y"; then
-      if "$BIN_PATH" --config "$CONFIG" --init; then
-        INIT_STATUS=0
-      else
-        INIT_STATUS=$?
-      fi
-    else
-      warn "baseline not created; the dashboard will report it as missing"
-    fi
-  fi
-fi
-
+SYSTEMD_READY=0
 if [ "$PREFIX" = "/" ] && command -v systemctl >/dev/null 2>&1; then
+  SYSTEMD_READY=1
   say "Installing systemd service"
   install -d -m 0755 "$(dirname "$SERVICE_PATH")"
-  cat > "$SERVICE_PATH" <<EOF
+  cat > "$TMP/rpi-aide.service" <<EOF
 [Unit]
 Description=$PROJECT file integrity monitor
 Documentation=https://github.com/$REPO
@@ -410,9 +384,45 @@ SyslogIdentifier=$SERVICE_NAME
 [Install]
 WantedBy=multi-user.target
 EOF
-  chmod 644 "$SERVICE_PATH"
+  if [ -f "$SERVICE_PATH" ] && cmp -s "$TMP/rpi-aide.service" "$SERVICE_PATH"; then
+    say "Service unit is already in place."
+  else
+    install -m 0644 "$TMP/rpi-aide.service" "$SERVICE_PATH"
+  fi
   systemctl daemon-reload
   systemctl enable "$SERVICE_NAME" >/dev/null 2>&1 || warn "could not enable $SERVICE_NAME"
+fi
+
+INIT_STATUS=0
+if [ "$NO_INIT" -eq 0 ]; then
+  if [ -f "$STATE_DIR/baseline.json" ]; then
+    if [ "$CONFIG_EXISTS" -eq 0 ] || [ "$RECONFIGURE" -eq 1 ]; then
+      if confirm "Replace the existing baseline with a fresh scan?" "y"; then
+        if "$BIN_PATH" --config "$CONFIG" --init --force; then
+          INIT_STATUS=0
+        else
+          INIT_STATUS=$?
+        fi
+      else
+        warn "baseline not replaced; the dashboard will report a mismatch until you run --init --force"
+      fi
+    else
+      say "Keeping the existing baseline."
+    fi
+  else
+    if confirm "Create the initial baseline now? This can take a while." "y"; then
+      if "$BIN_PATH" --config "$CONFIG" --init; then
+        INIT_STATUS=0
+      else
+        INIT_STATUS=$?
+      fi
+    else
+      warn "baseline not created; the dashboard will report it as missing"
+    fi
+  fi
+fi
+
+if [ "$SYSTEMD_READY" -eq 1 ]; then
   if [ "$NO_START" -eq 0 ]; then
     if ! systemctl restart "$SERVICE_NAME"; then
       systemctl status --no-pager "$SERVICE_NAME" || true
