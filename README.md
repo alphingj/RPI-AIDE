@@ -1,4 +1,4 @@
-# my-ids
+# RPI-AIDE
 
 A small file integrity monitor for Linux hosts, written in Rust. It hashes a set of
 directories, stores a baseline, reports added, modified, and deleted paths, and serves
@@ -7,6 +7,48 @@ a dashboard from an HTML page embedded in the binary.
 The target deployment is a Raspberry Pi Zero running Pi-hole. One static ARMv6 binary,
 no runtime assets, no external requests, and a polling dashboard that stays out of the
 DNS fast path.
+
+## Install with one command
+
+On the Pi, as root:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/alphingj/RPI-AIDE/main/install.sh | sudo bash
+```
+
+The installer downloads the right static binary for the host architecture, asks a short
+set of setup questions, writes the config, creates the first baseline, installs a systemd
+service, and starts it. It prints the dashboard URL and an SSH tunnel command at the end.
+
+The same command handles upgrades. It keeps an existing config and baseline unless you
+pass `--reconfigure`.
+
+Unattended install with the defaults:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/alphingj/RPI-AIDE/main/install.sh | sudo bash -s -- --yes
+```
+
+Re-run the setup later:
+
+```sh
+sudo rpi-aide-setup --reconfigure
+```
+
+Supported release assets:
+
+| Host | Asset |
+| ---- | ----- |
+| Pi Zero, Pi 1, ARMv6 | `rpi-aide-armv6` |
+| Pi 2, Pi 3, Pi 4 with a 32-bit OS | `rpi-aide-armv7` |
+| Pi 3, Pi 4, Pi 5 with a 64-bit OS | `rpi-aide-aarch64` |
+| x86_64 Linux | `rpi-aide-x86_64` |
+
+All four are static musl binaries. The installer selects the asset from `uname -m` and
+verifies it against `SHA256SUMS` before installing. If a release asset is not available,
+pass `--binary /path/to/rpi-aide` or build from source.
+
+Releases: https://github.com/alphingj/RPI-AIDE/releases
 
 ## What it does
 
@@ -21,9 +63,12 @@ DNS fast path.
 
 ## Requirements
 
-- Linux. The monitor needs read access to the configured roots.
-- Rust stable with Cargo for a native build.
+- Linux with systemd for the service install. The binary itself does not need systemd.
+- Read access to the configured roots.
 - Root when monitoring `/etc`, `/boot`, or the systemd unit directories.
+- The one-command installer needs `curl` or `wget`, `sha256sum`, and `install` from
+  coreutils. Raspberry Pi OS has all of them.
+- Rust stable with Cargo only for a source build.
 - For a Pi Zero cross build: `rustup target add arm-unknown-linux-musleabihf` and an
   `arm-linux-gnueabihf-gcc` linker. The binary is static and does not need a sysroot at
   runtime.
@@ -35,7 +80,7 @@ cargo build --release
 cargo test
 ```
 
-The native binary is `target/release/my-ids`.
+The native binary is `target/release/rpi-aide`.
 
 ### Pi Zero (ARMv6, static)
 
@@ -50,27 +95,72 @@ CARGO_TARGET_ARM_UNKNOWN_LINUX_MUSLEABIHF_LINKER=arm-linux-gnueabihf-gcc \
 Verify the result before copying it:
 
 ```sh
-file target/arm-unknown-linux-musleabihf/release/my-ids
-readelf -A target/arm-unknown-linux-musleabihf/release/my-ids | grep Tag_CPU_arch
+file target/arm-unknown-linux-musleabihf/release/rpi-aide
+readelf -A target/arm-unknown-linux-musleabihf/release/rpi-aide | grep Tag_CPU_arch
 ```
 
 Expected: `ELF 32-bit LSB executable, ARM, EABI5 ... statically linked` and
 `Tag_CPU_arch: v6`. Do not use the glibc `arm-unknown-linux-gnueabihf` build for a Pi
 Zero. That target is tagged ARMv7 and can fault with an illegal instruction on ARMv6.
 
-## Install on a Pi
+### Other release targets
 
 ```sh
-sudo install -m 0755 target/arm-unknown-linux-musleabihf/release/my-ids /usr/local/bin/my-ids
-sudo install -m 0755 deploy/my-ids.service /etc/systemd/system/my-ids.service
-sudo install -d -m 0700 /etc/my-ids /var/lib/my-ids
-sudo /usr/local/bin/my-ids --config /etc/my-ids/config.json --init
-sudo systemctl daemon-reload
-sudo systemctl enable --now my-ids
+rustup target add armv7-unknown-linux-musleabihf aarch64-unknown-linux-musl x86_64-unknown-linux-musl
+
+CARGO_TARGET_ARMV7_UNKNOWN_LINUX_MUSLEABIHF_LINKER=arm-linux-gnueabihf-gcc \
+  cargo build --release --target armv7-unknown-linux-musleabihf
+
+CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc \
+  cargo build --release --target aarch64-unknown-linux-musl
+
+cargo build --release --target x86_64-unknown-linux-musl
 ```
 
-`--init` writes `/etc/my-ids/config.json` if it is missing, using the defaults below.
-Then it writes `/var/lib/my-ids/baseline.json` and the last-scan record with mode `0600`.
+The release page publishes the ARMv6, ARMv7, AArch64, and x86_64 static binaries for
+version `0.0.1`.
+
+## Initial setup
+
+The one-command installer is the setup wizard. It asks for:
+
+1. The directories to monitor. The default set is `/etc`, `/boot`, `/boot/firmware` when
+   present, `/usr/bin`, `/usr/sbin`, and `/usr/lib/systemd/system`.
+2. The dashboard bind address. The default is `127.0.0.1:8080`.
+3. The maximum file size to hash. The default is 256 MB.
+
+It writes `config.json` with mode `0600`, creates `/var/lib/rpi-aide` with mode `0700`,
+excludes the Pi-hole database and volatile paths, creates the baseline, installs the
+systemd unit, and starts the service. If the baseline has scan errors, the installer says
+so and exits non-zero.
+
+For unattended setup, `--yes` accepts the defaults. The environment variables
+`RPI_AIDE_ROOTS`, `RPI_AIDE_BIND`, and `RPI_AIDE_MAX_MB` override the prompt defaults.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/alphingj/RPI-AIDE/main/install.sh \
+  | sudo bash -s -- --yes
+```
+
+Use `sudo rpi-aide-setup --reconfigure` to change the roots or bind address later. The
+installer backs up the previous config before writing a new one. Rebuilding the baseline
+invalidates the old alert rows, which is expected.
+
+## Manual install
+
+Use this only if you do not want the installer:
+
+```sh
+sudo install -m 0755 target/arm-unknown-linux-musleabihf/release/rpi-aide /usr/local/bin/rpi-aide
+sudo install -m 0755 deploy/rpi-aide.service /etc/systemd/system/rpi-aide.service
+sudo install -d -m 0700 /etc/rpi-aide /var/lib/rpi-aide
+sudo /usr/local/bin/rpi-aide --config /etc/rpi-aide/config.json --init
+sudo systemctl daemon-reload
+sudo systemctl enable --now rpi-aide
+```
+
+`--init` writes `/etc/rpi-aide/config.json` if it is missing, using the defaults below.
+Then it writes `/var/lib/rpi-aide/baseline.json` and the last-scan record with mode `0600`.
 It exits `1` if any path could not be read, even though it still writes a baseline. Check
 the errors before treating that baseline as complete.
 
@@ -82,15 +172,15 @@ Check the dashboard from the Pi:
 
 ```sh
 curl -s http://127.0.0.1:8080/api/status
-systemctl status my-ids
-journalctl -u my-ids -f
+systemctl status rpi-aide
+journalctl -u rpi-aide -f
 ```
 
 ## Config
 
-The default file is `/etc/my-ids/config.json`. `MY_IDS_CONFIG` overrides the path when
+The default file is `/etc/rpi-aide/config.json`. `RPI_AIDE_CONFIG` overrides the path when
 `--config` is not used. Without that variable, a non-root process looks for `./config.json`,
-while root looks in `/etc/my-ids/config.json`.
+while root looks in `/etc/rpi-aide/config.json`.
 
 ```json
 {
@@ -113,15 +203,15 @@ while root looks in `/etc/my-ids/config.json`.
     "/var/log",
     "/var/cache",
     "/var/tmp",
-    "/var/lib/my-ids",
+    "/var/lib/rpi-aide",
     "/run",
     "/proc",
     "/sys",
     "/dev",
     "/tmp"
   ],
-  "baseline_path": "/var/lib/my-ids/baseline.json",
-  "alerts_path": "/var/lib/my-ids/alerts.jsonl",
+  "baseline_path": "/var/lib/rpi-aide/baseline.json",
+  "alerts_path": "/var/lib/rpi-aide/alerts.jsonl",
   "bind": "127.0.0.1:8080",
   "max_alerts": 500,
   "max_file_bytes": 268435456
@@ -147,7 +237,7 @@ The state directory is excluded automatically, along with `/proc`, `/sys`, `/dev
 ## CLI
 
 ```text
-my-ids [--init | --check | --serve] [--config PATH] [--force] [--quiet]
+rpi-aide [--init | --check | --serve] [--config PATH] [--force] [--quiet]
 
 --init      Scan the roots and write a new baseline
 --check     Compare the live filesystem with the baseline
@@ -178,7 +268,7 @@ The dashboard binds to `127.0.0.1:8080` by default.
 | `GET` | `/` | Embedded dashboard |
 | `GET` | `/api/status` | Baseline state, last scan, host and process metrics, poll interval |
 | `GET` | `/api/alerts` | Current alert rows for the active baseline generation |
-| `POST` | `/api/scan` | Start a scan. Requires `x-my-ids-scan: 1` |
+| `POST` | `/api/scan` | Start a scan. Requires `x-rpi-aide-scan: 1` |
 | `GET` | `/healthz` | Plain text `ok` |
 | `GET` | `/favicon.ico` | `204 No Content` |
 
@@ -241,7 +331,8 @@ the measured results.
 ```text
 src/main.rs          monitor, persistence, HTTP server, tests
 src/dashboard.html   embedded dashboard and styles
-deploy/my-ids.service
+install.sh           one-command installer and setup wizard
+deploy/rpi-aide.service
 DESIGN.md            interface tokens and verification notes
 Cargo.toml
 ```

@@ -6,12 +6,12 @@
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#f5f5f7">
 <meta name="referrer" content="no-referrer">
-<title>my-ids | file integrity</title>
+<title>RPI-AIDE | file integrity</title>
 <script>
   (function () {
     var mode = "light";
     try {
-      var stored = localStorage.getItem("my-ids-theme");
+      var stored = localStorage.getItem("rpi-aide-theme");
       if (stored === "light" || stored === "dark") {
         mode = stored;
       } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
@@ -673,7 +673,7 @@
 <div class="shell">
   <header class="topbar">
     <div class="brand">
-      <p class="wordmark">my-ids</p>
+      <p class="wordmark">RPI-AIDE</p>
       <p class="brand-note">File integrity monitor</p>
     </div>
     <div class="controls">
@@ -845,7 +845,7 @@
 
   function storedTheme() {
     try {
-      return localStorage.getItem("my-ids-theme");
+      return localStorage.getItem("rpi-aide-theme");
     } catch (error) {
       return null;
     }
@@ -860,7 +860,7 @@
     }
     if (persist) {
       try {
-        localStorage.setItem("my-ids-theme", mode);
+        localStorage.setItem("rpi-aide-theme", mode);
       } catch (error) {
         /* Storage can be unavailable in private modes; the theme still applies for this visit. */
       }
@@ -1010,10 +1010,10 @@
       message = state.error + " Retrying automatically.";
       tone = "error";
     } else if (!status.baseline || !status.baseline.exists) {
-      message = "No baseline found. Run my-ids --init on the host, then scan again.";
+      message = "No baseline found. Run rpi-aide --init on the host, then scan again.";
       tone = "warn";
     } else if (!status.baseline.valid) {
-      message = (status.baseline.reason || "The baseline file could not be parsed.") + " Regenerate it with my-ids --init --force.";
+      message = (status.baseline.reason || "The baseline file could not be parsed.") + " Regenerate it with rpi-aide --init --force.";
       tone = "error";
     } else if (status.last_scan && status.last_scan.message) {
       message = status.last_scan.message;
@@ -1291,7 +1291,7 @@
     var banner = byId("banner");
     banner.hidden = false;
     banner.dataset.tone = "error";
-    setText("bannerText", "Cannot reach the my-ids API. Retrying automatically.");
+    setText("bannerText", "Cannot reach the RPI-AIDE API. Retrying automatically.");
     renderListError("Status API unreachable", "The dashboard will keep retrying in the background.");
   }
 
@@ -1303,7 +1303,7 @@
 
     fetchJson("/api/scan", {
       method: "POST",
-      headers: { "x-my-ids-scan": "1" }
+      headers: { "x-rpi-aide-scan": "1" }
     })
       .then(function () {
         if (state.status) {

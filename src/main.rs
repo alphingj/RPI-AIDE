@@ -22,28 +22,28 @@ use walkdir::WalkDir;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const HASH_CHUNK: usize = 4096;
-const BASELINE_FORMAT: &str = "my-ids-baseline";
+const BASELINE_FORMAT: &str = "rpi-aide-baseline";
 const BASELINE_VERSION: u32 = 1;
 const ALERTS_ROTATE_BYTES: u64 = 5 * 1024 * 1024;
-const DEFAULT_CONFIG_ETC: &str = "/etc/my-ids/config.json";
+const DEFAULT_CONFIG_ETC: &str = "/etc/rpi-aide/config.json";
 const DASHBOARD: &str = include_str!("dashboard.html");
 const CONTENT_SECURITY_POLICY: &str = "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
 static QUIET: AtomicBool = AtomicBool::new(false);
 
 const USAGE: &str = concat!(
-    "my-ids ",
+    "RPI-AIDE ",
     env!("CARGO_PKG_VERSION"),
     "\n",
     "Lightweight file integrity monitor for small Linux hosts.\n\n",
     "USAGE:\n",
-    "    my-ids [--init | --check | --serve] [--config PATH] [--force] [--quiet]\n\n",
+    "    rpi-aide [--init | --check | --serve] [--config PATH] [--force] [--quiet]\n\n",
     "MODES:\n",
     "    --init      Scan the configured roots and write a new baseline\n",
     "    --check     Compare the live filesystem with the baseline\n",
     "    --serve     Start the dashboard (default when no mode is given)\n\n",
     "OPTIONS:\n",
-    "    --config PATH   Config file (default: /etc/my-ids/config.json or ./config.json)\n",
+    "    --config PATH   Config file (default: /etc/rpi-aide/config.json or ./config.json)\n",
     "    --force         Replace an existing baseline during --init\n",
     "    --quiet         Suppress informational log lines\n",
     "    -h, --help      Show this help\n",
@@ -107,7 +107,7 @@ impl Default for Config {
                 "/var/log",
                 "/var/cache",
                 "/var/tmp",
-                "/var/lib/my-ids",
+                "/var/lib/rpi-aide",
                 "/run",
                 "/proc",
                 "/sys",
@@ -117,8 +117,8 @@ impl Default for Config {
             .iter()
             .map(PathBuf::from)
             .collect(),
-            baseline_path: PathBuf::from("/var/lib/my-ids/baseline.json"),
-            alerts_path: PathBuf::from("/var/lib/my-ids/alerts.jsonl"),
+            baseline_path: PathBuf::from("/var/lib/rpi-aide/baseline.json"),
+            alerts_path: PathBuf::from("/var/lib/rpi-aide/alerts.jsonl"),
             bind: "127.0.0.1:8080".to_string(),
             max_alerts: 500,
             max_file_bytes: 256 * 1024 * 1024,
@@ -472,7 +472,7 @@ async fn main() {
     let code = match run().await {
         Ok(code) => code,
         Err(message) => {
-            eprintln!("my-ids: {message}");
+            eprintln!("rpi-aide: {message}");
             2
         }
     };
@@ -488,7 +488,7 @@ async fn run() -> Result<i32, String> {
             return Ok(0);
         }
         Action::Version => {
-            println!("my-ids {VERSION}");
+            println!("RPI-AIDE {VERSION}");
             return Ok(0);
         }
         Action::Init | Action::Check | Action::Serve => {}
@@ -516,7 +516,7 @@ async fn run() -> Result<i32, String> {
         }
         Action::Check => {
             if !source.loaded() && !cfg.baseline_path.exists() {
-                return Err("no config or baseline found; run 'my-ids --init' first".to_string());
+                return Err("no config or baseline found; run 'rpi-aide --init' first".to_string());
             }
             let next_id = next_alert_id(&cfg);
             let outcome = perform_check(&cfg, next_id)?;
@@ -585,7 +585,7 @@ fn resolve_config_path(cli: Option<&Path>) -> PathBuf {
     if let Some(path) = cli {
         return path.to_path_buf();
     }
-    if let Ok(value) = std::env::var("MY_IDS_CONFIG") {
+    if let Ok(value) = std::env::var("RPI_AIDE_CONFIG") {
         if !value.trim().is_empty() {
             return PathBuf::from(value);
         }
@@ -1183,7 +1183,7 @@ fn load_baseline(path: &Path) -> Result<Baseline, String> {
     let bytes = fs::read(path).map_err(|error| {
         if error.kind() == io::ErrorKind::NotFound {
             format!(
-                "baseline '{}' not found; run 'my-ids --init'",
+                "baseline '{}' not found; run 'rpi-aide --init'",
                 path.display()
             )
         } else {
@@ -1195,7 +1195,7 @@ fn load_baseline(path: &Path) -> Result<Baseline, String> {
         .map_err(|error| format!("cannot parse baseline '{}': {error}", path.display()))?;
 
     if baseline.format != BASELINE_FORMAT {
-        return Err(format!("'{}' is not a my-ids baseline", path.display()));
+        return Err(format!("'{}' is not a rpi-aide baseline", path.display()));
     }
     if baseline.version != BASELINE_VERSION {
         return Err(format!(
@@ -1578,7 +1578,7 @@ async fn serve(cfg: Config, source: ConfigSource) -> Result<i32, String> {
     }
     if !cfg.baseline_path.exists() {
         warn(&format!(
-            "baseline '{}' is missing; run 'my-ids --init' before scanning",
+            "baseline '{}' is missing; run 'rpi-aide --init' before scanning",
             cfg.baseline_path.display()
         ));
     }
@@ -1704,16 +1704,16 @@ async fn api_scan(
     // dashboard is same-origin, so this blocks drive-by form posts to the scan
     // endpoint without adding a token to the static page.
     if headers
-        .get("x-my-ids-scan")
+        .get("x-rpi-aide-scan")
         .and_then(|value| value.to_str().ok())
         != Some("1")
     {
-        return Err(ApiError::forbidden("missing x-my-ids-scan header"));
+        return Err(ApiError::forbidden("missing x-rpi-aide-scan header"));
     }
 
     if !state.cfg.baseline_path.exists() {
         return Err(ApiError::conflict(
-            "baseline is missing; run my-ids --init on the host",
+            "baseline is missing; run rpi-aide --init on the host",
         ));
     }
 
@@ -2046,7 +2046,7 @@ mod tests {
             next_id: 5,
             last_scan: None,
             baseline: BaselineMeta {
-                path: "/var/lib/my-ids/baseline.json".to_string(),
+                path: "/var/lib/rpi-aide/baseline.json".to_string(),
                 exists: true,
                 valid: true,
                 created_at: 100,
@@ -2068,7 +2068,7 @@ mod tests {
 
     #[test]
     fn baseline_meta_validates_format_and_version() {
-        let base = std::env::temp_dir().join(format!("my-ids-meta-test-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("rpi-aide-meta-test-{}", std::process::id()));
         fs::create_dir_all(&base).expect("create temp directory");
         let config = Config {
             roots: vec![PathBuf::from("/etc")],
@@ -2103,7 +2103,8 @@ mod tests {
 
     #[test]
     fn alert_history_survives_invalid_utf8() {
-        let base = std::env::temp_dir().join(format!("my-ids-alerts-test-{}", std::process::id()));
+        let base =
+            std::env::temp_dir().join(format!("rpi-aide-alerts-test-{}", std::process::id()));
         fs::create_dir_all(&base).expect("create temp directory");
         let config = Config {
             alerts_path: base.join("alerts.jsonl"),
@@ -2169,13 +2170,13 @@ mod tests {
     #[test]
     fn config_rejects_colliding_state_paths() {
         let config = Config {
-            baseline_path: PathBuf::from("/var/lib/my-ids/last_scan.json"),
+            baseline_path: PathBuf::from("/var/lib/rpi-aide/last_scan.json"),
             ..Config::default()
         };
         assert!(config.validate().is_err());
 
         let config = Config {
-            alerts_path: PathBuf::from("/var/lib/my-ids/baseline.json"),
+            alerts_path: PathBuf::from("/var/lib/rpi-aide/baseline.json"),
             ..Config::default()
         };
         assert!(config.validate().is_err());

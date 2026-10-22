@@ -1,6 +1,6 @@
 [package]
-name = "my-ids"
-version = "1.0.0"
+name = "rpi-aide"
+version = "0.0.1"
 edition = "2021"
 description = "Lightweight file integrity monitor with an embedded dashboard for small Linux hosts"
 license = "MIT"

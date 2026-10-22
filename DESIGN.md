@@ -134,7 +134,7 @@ Final run: 2026-10-22, report at `/tmp/opencode/final-report.json`.
 | Main state | `Changes found`, 4 unique alert rows, metrics `1 / 2 / 1 / 0` |
 | Loading | 3 skeletons, `Connecting`, `Loading`; still 3 skeletons after a filter click |
 | Empty | `Protected`, `No anomalies recorded`, 0 rows, no error banner |
-| Offline | `Offline`, `Cannot reach the my-ids API. Retrying automatically.`, `Status API unreachable` |
+| Offline | `Offline`, `Cannot reach the RPI-AIDE API. Retrying automatically.`, `Status API unreachable` |
 | Filters | Added, modified, deleted, and all return the expected rows |
 | Theme | Light to dark to light from the top bar and keyboard; `aria-pressed` follows |
 | Keyboard | Skip link reaches `#main`; focus outline is `2px solid`; tab order is visual order |
@@ -143,7 +143,7 @@ Final run: 2026-10-22, report at `/tmp/opencode/final-report.json`.
 | Mobile 390 | No horizontal overflow, filter grid, four 44px controls |
 | Mobile 360 | No horizontal overflow, filter grid, four 44px controls |
 | Mobile 320 | No horizontal overflow, filter grid, four 44px controls |
-| Scan CSRF | `POST /api/scan` without `x-my-ids-scan: 1` returns `403`; with it returns `202` |
+| Scan CSRF | `POST /api/scan` without `x-rpi-aide-scan: 1` returns `403`; with it returns `202` |
 
 ## Delivery gate
 
