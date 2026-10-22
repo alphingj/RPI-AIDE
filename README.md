@@ -50,6 +50,10 @@ pass `--binary /path/to/rpi-aide` or build from source.
 
 Releases: https://github.com/alphingj/RPI-AIDE/releases
 
+Version `0.0.1` is the first RPI-AIDE release. If you ran an earlier local build under the
+name `my-ids`, its baseline format and state paths are different. Run the installer and
+let it create a new baseline under `/var/lib/rpi-aide`; do not reuse the old state.
+
 ## What it does
 
 - Walks the configured roots and records files, directories, symlinks, and special files.

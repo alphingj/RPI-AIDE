@@ -406,7 +406,10 @@ EOF
   systemctl daemon-reload
   systemctl enable "$SERVICE_NAME" >/dev/null 2>&1 || warn "could not enable $SERVICE_NAME"
   if [ "$NO_START" -eq 0 ]; then
-    systemctl restart "$SERVICE_NAME"
+    if ! systemctl restart "$SERVICE_NAME"; then
+      systemctl status --no-pager "$SERVICE_NAME" || true
+      die "service failed to start; inspect with: journalctl -u $SERVICE_NAME"
+    fi
     HEALTHY=0
     PORT="${BIND##*:}"
     for _ in 1 2 3 4 5 6 7 8 9 10; do
