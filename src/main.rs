@@ -898,6 +898,35 @@ fn hash_file(
     })
 }
 
+fn diff_entries_scanned(
+    previous: &[Record],
+    current: &[Record],
+    errors: &[ScanError],
+) -> Vec<Detected> {
+    if errors.is_empty() {
+        return diff_entries(previous, current);
+    }
+    diff_entries(previous, current)
+        .into_iter()
+        .filter(|item| {
+            !errors
+                .iter()
+                .any(|error| path_is_within(&item.path, &error.path))
+        })
+        .collect()
+}
+
+fn path_is_within(path: &str, prefix: &str) -> bool {
+    if path == prefix {
+        return true;
+    }
+    if prefix == "/" {
+        return path.starts_with('/');
+    }
+    path.strip_prefix(prefix)
+        .is_some_and(|rest| rest.starts_with('/'))
+}
+
 fn diff_entries(previous: &[Record], current: &[Record]) -> Vec<Detected> {
     let mut previous_by_path: HashMap<&str, &Record> = HashMap::with_capacity(previous.len());
     for record in previous {
@@ -1078,7 +1107,7 @@ fn perform_check(cfg: &Config, start_id: u64) -> Result<CheckOutcome, String> {
     let started_at = now();
     let started = Instant::now();
     let outcome = scan_filesystem(cfg)?;
-    let detected = diff_entries(&baseline.entries, &outcome.entries);
+    let detected = diff_entries_scanned(&baseline.entries, &outcome.entries, &outcome.errors);
     let detected_at = now();
 
     let mut next_id = start_id;
@@ -2187,5 +2216,43 @@ mod tests {
         assert_eq!(human_bytes(512), "512 B");
         assert_eq!(human_bytes(1536), "1.50 KB");
         assert_eq!(human_bytes(5 * 1024 * 1024), "5.00 MB");
+    }
+
+    #[test]
+    fn unscanned_files_do_not_become_deleted_alerts() {
+        let previous = vec![
+            record("/etc/a", Kind::File, 0o644, Some("aa")),
+            record("/etc/b", Kind::File, 0o644, Some("bb")),
+        ];
+        let errors = vec![ScanError {
+            path: "/etc/a".to_string(),
+            message: "open failed: permission denied".to_string(),
+        }];
+        let detected = diff_entries_scanned(&previous, &[], &errors);
+        assert_eq!(detected.len(), 1);
+        assert_eq!(detected[0].kind, ChangeKind::Deleted);
+        assert_eq!(detected[0].path, "/etc/b");
+    }
+
+    #[test]
+    fn unscanned_directories_suppress_descendant_deletions() {
+        let previous = vec![
+            record("/srv/a", Kind::File, 0o644, Some("aa")),
+            record("/srv/b", Kind::File, 0o644, Some("bb")),
+        ];
+        let errors = vec![ScanError {
+            path: "/srv".to_string(),
+            message: "read_dir failed".to_string(),
+        }];
+        assert!(diff_entries_scanned(&previous, &[], &errors).is_empty());
+    }
+
+    #[test]
+    fn path_prefix_matching_is_component_aware() {
+        assert!(path_is_within("/srv/a", "/srv"));
+        assert!(path_is_within("/srv", "/srv"));
+        assert!(path_is_within("/etc/passwd", "/"));
+        assert!(!path_is_within("/srv2/a", "/srv"));
+        assert!(!path_is_within("/etc", "/etc/passwd"));
     }
 }
