@@ -330,6 +330,10 @@ Chromium build. The verified dashboard checks include clean, loading, empty, err
 filter, theme, keyboard, and mobile states. See `DESIGN.md` for the interface decisions and
 the measured results.
 
+The installer was tested in prefix mode with a local binary, with a downloaded release
+asset and SHA256 verification, through piped stdin, with the interactive prompts, and on
+a repeat run that kept the existing config and baseline.
+
 ## Repository layout
 
 ```text
