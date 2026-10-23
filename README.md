@@ -180,6 +180,36 @@ systemctl status rpi-aide
 journalctl -u rpi-aide -f
 ```
 
+### Open the dashboard from another device
+
+The default bind is loopback, so only the Pi itself can reach the dashboard. To open it
+from a PC or phone on the same network, rebind the service to the LAN interface:
+
+```sh
+sudo env RPI_AIDE_BIND=0.0.0.0:8111 rpi-aide-setup --reconfigure --no-init
+```
+
+Then browse to `http://<pi-address>:8111`. For the same setting during a one-command
+install, pass the variable through `sudo`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/alphingj/RPI-AIDE/main/install.sh \
+  | sudo env RPI_AIDE_BIND=0.0.0.0:8111 bash -s -- --yes
+```
+
+The dashboard has no authentication. On a trusted home network this is usually fine, but
+every device on that network can read status and alerts and can trigger a scan. If the
+network is not trusted, add a firewall rule that allows only your device, or put an
+authenticated reverse proxy in front of port 8111. Never expose it to the internet.
+
+If you prefer no exposure at all, keep the loopback bind and tunnel it over SSH instead:
+
+```sh
+ssh -L 8111:127.0.0.1:8111 user@your-pi
+```
+
+Then open `http://127.0.0.1:8111` on your machine.
+
 ## Config
 
 The default file is `/etc/rpi-aide/config.json`. `RPI_AIDE_CONFIG` overrides the path when
@@ -292,8 +322,9 @@ blocks external scripts, images, fonts, and connections.
 
 ## Security notes
 
-- There is no built-in authentication. Keep `bind` on loopback, or put an authenticated
-  reverse proxy in front of it. Do not expose port 8080 directly to a LAN or the internet.
+- There is no built-in authentication. Keep `bind` on loopback, or bind to a trusted LAN
+  interface and protect the port with a firewall or an authenticated reverse proxy. Do
+  not expose it to the internet.
 - State files are written atomically through a pid-specific temporary file, flushed,
   and renamed. New state directories are created with mode `0700`; files use `0600`.
 - The monitor is read-only against the monitored roots. It only writes its baseline,

@@ -468,15 +468,28 @@ fi
 
 say ""
 say "Installed."
+PORT="${BIND##*:}"
 case "$BIND" in
-  0.0.0.0:*) URL_HOST="127.0.0.1" ;;
-  \[::\]:*) URL_HOST="[::1]" ;;
-  *:*) URL_HOST="${BIND%:*}" ;;
+  127.0.0.1:*|localhost:*|\[::1\]:*)
+    URL_HOST="${BIND%:*}"
+    say "Dashboard: http://$URL_HOST:$PORT"
+    say "This address is local to the host. From another machine, tunnel it over SSH:"
+    say "  ssh -L $PORT:127.0.0.1:$PORT user@your-pi"
+    ;;
+  0.0.0.0:*|\[::\]:*)
+    URL_HOST="$(hostname -I 2>/dev/null | cut -d' ' -f1)"
+    [ -n "$URL_HOST" ] || URL_HOST="127.0.0.1"
+    say "Dashboard: http://$URL_HOST:$PORT"
+    say "The dashboard has no built-in authentication. Use it only on a trusted network,"
+    say "or put an authenticated reverse proxy in front of port $PORT."
+    ;;
+  *)
+    URL_HOST="${BIND%:*}"
+    say "Dashboard: http://$URL_HOST:$PORT"
+    say "The dashboard has no built-in authentication. Use it only on a trusted network,"
+    say "or put an authenticated reverse proxy in front of port $PORT."
+    ;;
 esac
-URL="http://$URL_HOST:${BIND##*:}"
-say "Dashboard: $URL"
-say "This address is local to the host. From another machine, tunnel it over SSH:"
-say "  ssh -L ${BIND##*:}:127.0.0.1:${BIND##*:} user@your-pi"
 say ""
 say "Useful commands:"
 say "  $BIN_PATH --config $CONFIG --check"
