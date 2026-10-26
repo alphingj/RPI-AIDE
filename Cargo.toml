@@ -1,18 +1,19 @@
 [package]
 name = "rpi-aide"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2021"
-description = "Lightweight file integrity monitor with an embedded dashboard for small Linux hosts"
+description = "Lightweight file integrity monitor with a port-scan guard and an embedded dashboard for small Linux hosts"
 license = "MIT"
 publish = false
 
 [dependencies]
 axum = { version = "0.7.9", default-features = false, features = ["http1", "json", "tokio"] }
-tokio = { version = "1", default-features = false, features = ["rt", "net", "macros", "time", "signal"] }
+tokio = { version = "1", default-features = false, features = ["rt", "net", "macros", "time", "signal", "sync"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 blake3 = { version = "1", default-features = false, features = ["std"] }
 walkdir = "2.5"
+libc = "0.2"
 
 [profile.release]
 opt-level = "z"

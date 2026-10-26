@@ -79,20 +79,36 @@ signal: each alert row also has a text kind and each metric has a label.
 ## Layout
 
 - A single column at every width.
-- Top bar: wordmark, scan action, theme control.
-- State block: status, last check, added/modified/deleted/errors.
-- Alerts block: filter row, then a list of paths.
-- On mobile, filters become a 2x2 grid. Rows stack path above metadata.
+- Top bar: wordmark, log out (when auth is on), scan action, theme control.
+- State block: status, last check, next scheduled scan, added/modified/deleted/errors,
+  and a maintenance row.
+- Alerts block: kind filters plus severity filters, then a list of paths with severity
+  badges, expected/accepted badges, and an accept control.
+- Guard panel: mode segmented control, one-line status, active bans with unban
+  controls, and recent scan events.
+- On mobile, filters become a 2x2 grid, the guard panel stacks, and rows stack path
+  above metadata.
+- A separate login page renders when there is no session: one card, one field, one
+  button, with an inline error state for rejected tokens.
 - No sidebar, tab bar, card grid, logo strip, pricing block, or hero.
 
 ## Interaction
 
-- Filters are a four-way segmented control. The selected filter uses accent-soft fill,
+- Filters are segmented controls. The selected filter uses accent-soft fill,
   an accent border, and primary text. It is not conveyed by color alone.
+- Severity badges use the state colors but always carry the word
+  (`critical`, `warning`, `info`), so color is never the only signal.
 - The theme button is `aria-pressed`. It persists in `localStorage` and updates the
   `theme-color` meta tag.
 - The scan button enters a busy state with `disabled` and the label `Scanning`. A manual
   scan is single-flight.
+- Accepting a change triggers a rescan automatically; the row gains an `accepted`
+  badge and a strikethrough path, and the state returns to `Protected`.
+- The guard segmented control reflects the live mode, disables `Enforce` when no
+  firewall is usable, and shows one amber error line when the guard could not start.
+  Unban buttons act immediately; switching away from `enforce` clears active bans and
+  says so in the footnote.
+- The maintenance row shows the remaining time and a stop control while active.
 - Loading uses three skeleton rows and a `Connecting` state. Filter changes during loading
   do not replace the skeletons with an empty list.
 - Empty and error states have a title, one sentence, and a next step. Offline errors keep
@@ -124,14 +140,35 @@ Tool: Playwright with headless Chromium at `/usr/bin/chromium` against the real 
 server. Reticle could not instrument this page because it is static HTML served by a Rust
 binary, so Playwright is the browser evidence here.
 
-Final run: 2026-10-22, report at `/tmp/opencode/final-report.json`.
+Final run for 0.0.2: 2026-10-26, suite at `/tmp/opencode/ui_suite.py`, 19 checks
+against a live service with auth enabled and a live guard in monitor mode.
+
+| Check | Result |
+| ----- | ------ |
+| Unauthenticated visit | Lands on `/login`, login form visible |
+| Wrong token | `That token was not accepted. Try again.` on `/login?error=1` |
+| Correct token | Session cookie set, dashboard loads |
+| Status after a real change | `Changes found` after a scan |
+| Guard panel | Mode line, `Monitor` pressed, `Enforce` disabled without a firewall, no-bans empty state |
+| Severity | Tampered critical path shows the `critical` badge |
+| Severity filter | `Critical` hides info rows; `Any severity` restores them |
+| Accept flow | Row gains `accepted` badge and strikethrough path |
+| Scan after accept | State returns to `Protected` |
+| Maintenance | Banner appears with remaining time, `Stop` clears it |
+| System facts | Watch `on · 2 dirs`, guard `monitor · not listening`, auth `Enabled` |
+| Logout | Returns to `/login`; the session no longer opens `/` |
+| Console errors | None in the full run |
+
+Earlier 0.0.1 browser evidence (2026-10-22, report at `/tmp/opencode/final-report.json`)
+remains valid for the shared surface: loading skeletons, empty state, no-baseline,
+invalid-baseline, review-needed, offline, kind filters, theme, keyboard, mobile widths
+at 390/360/320, and the CSRF header check.
 
 | Check | Result |
 | ----- | ------ |
 | Console errors | `[]` |
 | Page errors | `[]` |
 | HTTP errors | `[]` |
-| Main state | `Changes found`, 4 unique alert rows, metrics `1 / 2 / 1 / 0` |
 | Loading | 3 skeletons, `Connecting`, `Loading`; still 3 skeletons after a filter click |
 | Empty | `Protected`, `No anomalies recorded`, 0 rows, no error banner |
 | No baseline | `No baseline`, scan disabled, `Missing` fact, init instruction banner |

@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f5f5f7">
+<meta name="referrer" content="no-referrer">
+<title>RPI-AIDE | Log in</title>
+<script>
+  (function () {
+    var mode = "light";
+    try {
+      var stored = localStorage.getItem("rpi-aide-theme");
+      if (stored === "light" || stored === "dark") {
+        mode = stored;
+      } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+        mode = "dark";
+      }
+    } catch (error) {
+      mode = "light";
+    }
+    document.documentElement.setAttribute("data-theme", mode);
+  })();
+</script>
+<style>
+  :root {
+    --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+    --mono: "SF Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --radius-surface: 20px;
+    --radius-control: 999px;
+  }
+
+  :root,
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --bg: #f5f5f7;
+    --surface: #ffffff;
+    --text: #1d1d1f;
+    --muted: #55555a;
+    --line: rgba(0, 0, 0, 0.09);
+    --line-strong: rgba(0, 0, 0, 0.16);
+    --accent: #0071e3;
+    --button-bg: #0071e3;
+    --button-text: #ffffff;
+    --red: #b3261e;
+    --red-soft: rgba(255, 59, 48, 0.12);
+  }
+
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #0b0b0d;
+    --surface: #161618;
+    --text: #f5f5f7;
+    --muted: #b0b0b5;
+    --line: rgba(255, 255, 255, 0.10);
+    --line-strong: rgba(255, 255, 255, 0.18);
+    --accent: #409cff;
+    --button-bg: #f5f5f7;
+    --button-text: #0b0b0d;
+    --red: #ff6961;
+    --red-soft: rgba(255, 105, 97, 0.15);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100dvh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    padding: 24px;
+  }
+
+  .card {
+    width: 100%;
+    max-width: 380px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-surface);
+    padding: 32px 28px;
+  }
+
+  .brand {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-bottom: 20px;
+  }
+
+  .wordmark {
+    margin: 0;
+    font-size: 21px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+
+  .brand-note {
+    margin: 0;
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 16px;
+  }
+
+  label { font-size: 13px; color: var(--muted); }
+
+  input {
+    font: inherit;
+    color: inherit;
+    background: transparent;
+    border: 1px solid var(--line-strong);
+    border-radius: 12px;
+    padding: 10px 14px;
+    min-height: 44px;
+  }
+
+  input:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  button {
+    font: inherit;
+    color: inherit;
+    width: 100%;
+    min-height: 44px;
+    border: none;
+    border-radius: var(--radius-control);
+    background: var(--button-bg);
+    color: var(--button-text);
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+  }
+
+  .message {
+    margin: 0 0 16px;
+    padding: 10px 14px;
+    border-radius: 12px;
+    background: var(--red-soft);
+    color: var(--red);
+    font-size: 13px;
+  }
+
+  .hint {
+    margin: 16px 0 0;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .mono { font-family: var(--mono); font-size: 12px; }
+</style>
+</head>
+<body>
+<main class="card">
+  <div class="brand">
+    <h1 class="wordmark">RPI-AIDE</h1>
+    <p class="brand-note">Enter the token from <span class="mono">rpi-aide --print-token</span></p>
+  </div>
+  <p id="message" class="message" hidden></p>
+  <form method="post" action="/login">
+    <div class="field">
+      <label for="token">Login token</label>
+      <input id="token" name="token" type="password" autocomplete="off" autofocus required>
+    </div>
+    <button type="submit">Log in</button>
+  </form>
+  <p class="hint">The token is stored next to the config file. Sessions last one week.</p>
+</main>
+<script>
+  (function () {
+    var query = window.location.search;
+    var element = document.getElementById("message");
+    if (query.indexOf("error=locked") >= 0) {
+      element.textContent = "Too many attempts. Wait 15 minutes before trying again.";
+      element.hidden = false;
+    } else if (query.indexOf("error=1") >= 0) {
+      element.textContent = "That token was not accepted. Try again.";
+      element.hidden = false;
+    }
+  })();
+</script>
+</body>
+</html>

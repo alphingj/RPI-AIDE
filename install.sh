@@ -38,6 +38,15 @@ One command:
 
 The installer reads prompts from /dev/tty, so it still works when the script is
 piped into bash. Use --yes for an unattended install with the defaults.
+
+Environment overrides for unattended installs:
+  RPI_AIDE_ROOTS         monitored directories
+  RPI_AIDE_BIND          dashboard bind address
+  RPI_AIDE_MAX_MB        maximum file size to hash
+  RPI_AIDE_SCAN_SECS     scheduled scan interval (0 = off)
+  RPI_AIDE_NOTIFY_URL    webhook or ntfy URL for alert delivery
+  RPI_AIDE_GUARD_MODE    monitor, enforce or off
+  RPI_AIDE_GUARD_ALLOW   space separated allowlisted IPs or CIDRs
 EOF
 }
 
@@ -177,8 +186,8 @@ esac
 
 say ""
 say "$PROJECT installer"
-say "This installs a read-only file integrity monitor and its dashboard."
-say "It writes the baseline and alerts under $STATE_DIR."
+say "This installs a file integrity monitor with a dashboard, a port-scan"
+say "guard, and notifications. It writes state under $STATE_DIR."
 say ""
 
 TMP="$(mktemp -d)"
@@ -255,11 +264,8 @@ else
   case "$BIND" in
     127.0.0.1:*|localhost:*|\[::1\]:*) ;;
     *)
-      warn "the dashboard has no built-in authentication"
-      warn "use an authenticated reverse proxy before exposing $BIND"
-      if [ "$YES" -eq 0 ] && [ -r /dev/tty ]; then
-        confirm "Continue with this bind address?" "n" || die "installation cancelled"
-      fi
+      say "The dashboard requires a token login, but traffic to $BIND is not encrypted."
+      say "Use it on a trusted LAN, tunnel it over SSH, or put a reverse proxy in front."
       ;;
   esac
 
@@ -270,6 +276,44 @@ else
   [ "$MAX_MB" -ge 1 ] || die "maximum file size must be at least 1 MB"
   [ "$MAX_MB" -le 4096 ] || die "maximum file size must be 4096 MB or less"
   MAX_BYTES=$((MAX_MB * 1024 * 1024))
+
+  SCAN_SECS="$(ask "Scheduled scan interval in seconds (0 = off)" "${RPI_AIDE_SCAN_SECS:-3600}")"
+  case "$SCAN_SECS" in
+    ''|*[!0-9]*) die "scan interval must be a whole number of seconds" ;;
+  esac
+  if [ "$SCAN_SECS" -ne 0 ] && [ "$SCAN_SECS" -lt 60 ]; then
+    die "scan interval must be 0 (off) or at least 60 seconds"
+  fi
+
+  NOTIFY_URL="$(ask "Notification URL: webhook or ntfy (empty skips)" "${RPI_AIDE_NOTIFY_URL:-}")"
+  NOTIFY_WEBHOOK="null"
+  NOTIFY_NTFY="null"
+  case "$NOTIFY_URL" in
+    https://ntfy.sh/*|https://*/topic*|*ntfy*)
+      NOTIFY_NTFY="\"$(json_escape "$NOTIFY_URL")\""
+      ;;
+    http://*|https://*)
+      NOTIFY_WEBHOOK="\"$(json_escape "$NOTIFY_URL")\""
+      ;;
+    "") ;;
+    *)
+      warn "notification URL must be http(s); delivery is disabled"
+      ;;
+  esac
+
+  GUARD_MODE="$(ask "Port-scan guard mode: monitor, enforce or off" "${RPI_AIDE_GUARD_MODE:-monitor}")"
+  case "$GUARD_MODE" in
+    monitor|enforce|off) ;;
+    *) die "guard mode must be monitor, enforce or off" ;;
+  esac
+
+  GUARD_ALLOW="$(ask "Guard allowlist (space separated IPs or CIDRs)" "${RPI_AIDE_GUARD_ALLOW:-100.64.0.0/10}")"
+  GUARD_ALLOW_ARRAY="$(json_array $GUARD_ALLOW)"
+  for ENTRY in $GUARD_ALLOW; do
+    case "$ENTRY" in
+      *[!0-9./]*) warn "allowlist entry may not be a valid IP or CIDR: $ENTRY" ;;
+    esac
+  done
 
   EXCLUDES=(
     "/etc/mtab"
@@ -307,10 +351,59 @@ else
     printf ',\n  "bind": "%s"' "$(json_escape "$BIND")"
     printf ',\n  "max_alerts": 500'
     printf ',\n  "max_file_bytes": %s' "$MAX_BYTES"
+    printf ',\n  "scan_interval_secs": %s' "$SCAN_SECS"
+    printf ',\n  "scan_on_start_delay_secs": 600'
+    printf ',\n  "scan_jitter_secs": 300'
+    printf ',\n  "full_scan_interval_secs": 86400'
+    printf ',\n  "notify": {\n    "webhook_url": %s' "$NOTIFY_WEBHOOK"
+    printf ',\n    "ntfy_url": %s' "$NOTIFY_NTFY"
+    printf ',\n    "min_severity": "info"'
+    printf ',\n    "on_guard_events": true'
+    printf ',\n    "timeout_secs": 5'
+    printf ',\n    "retry_secs": 60'
+    printf ',\n    "max_queue": 20\n  }'
+    printf ',\n  "auth": {\n    "enabled": true'
+    printf ',\n    "token_path": "%s"' "$(json_escape "$(dirname "$CONFIG")/token")"
+    printf ',\n    "session_ttl_secs": 604800'
+    printf ',\n    "max_failed_per_ip": 5'
+    printf ',\n    "lockout_secs": 900\n  }'
+    printf ',\n  "guard": {\n    "mode": "%s"' "$(json_escape "$GUARD_MODE")"
+    printf ',\n    "interface": "auto"'
+    printf ',\n    "critical_ports": [22, 53, 80, 443, 8080, 8111]'
+    printf ',\n    "window_secs": 10'
+    printf ',\n    "critical_port_threshold": 3'
+    printf ',\n    "total_port_threshold": 10'
+    printf ',\n    "syn_threshold": 50'
+    printf ',\n    "ban_secs": 3600'
+    printf ',\n    "repeat_ban_secs": 86400'
+    printf ',\n    "max_bans": 256'
+    printf ',\n    "allowlist": %s' "$GUARD_ALLOW_ARRAY"
+    printf ',\n    "state_path": "%s"\n  }' "$(json_escape "$STATE_DIR/guard_state.json")"
+    printf ',\n  "watch": {\n    "enabled": true'
+    printf ',\n    "paths": ["/etc", "/boot"]'
+    printf ',\n    "debounce_ms": 2000'
+    printf ',\n    "min_gap_secs": 60'
+    printf ',\n    "max_watches": 4096\n  }'
     printf '\n}\n'
   } > "$CONFIG"
   chmod 600 "$CONFIG"
   say "Wrote $CONFIG"
+fi
+
+# The login token: create it when missing so upgrades get auth too.
+TOKEN_PATH="$(dirname "$CONFIG")/token"
+TOKEN_PRINTED=""
+if [ ! -s "$TOKEN_PATH" ]; then
+  umask 077
+  if NEW_TOKEN="$(head -c 16 /dev/urandom 2>/dev/null | od -An -tx1 2>/dev/null | tr -d ' \n')"; then
+    if [ -n "$NEW_TOKEN" ]; then
+      printf '%s\n' "$NEW_TOKEN" > "$TOKEN_PATH"
+      chmod 600 "$TOKEN_PATH"
+      TOKEN_PRINTED="$NEW_TOKEN"
+      say "Created a new dashboard login token at $TOKEN_PATH"
+    fi
+  fi
+  [ -s "$TOKEN_PATH" ] || warn "could not create $TOKEN_PATH; the service will create one at start"
 fi
 
 case "$BIN_PATH$CONFIG$STATE_DIR" in
@@ -480,19 +573,25 @@ case "$BIND" in
     URL_HOST="$(hostname -I 2>/dev/null | cut -d' ' -f1)"
     [ -n "$URL_HOST" ] || URL_HOST="127.0.0.1"
     say "Dashboard: http://$URL_HOST:$PORT"
-    say "The dashboard has no built-in authentication. Use it only on a trusted network,"
-    say "or put an authenticated reverse proxy in front of port $PORT."
     ;;
   *)
     URL_HOST="${BIND%:*}"
     say "Dashboard: http://$URL_HOST:$PORT"
-    say "The dashboard has no built-in authentication. Use it only on a trusted network,"
-    say "or put an authenticated reverse proxy in front of port $PORT."
     ;;
 esac
 say ""
+if [ -n "$TOKEN_PRINTED" ]; then
+  say "Dashboard login token (keep it private, it will not be shown again):"
+  say "  $TOKEN_PRINTED"
+else
+  say "Dashboard login token: $TOKEN_PATH (view it with: $BIN_PATH --config $CONFIG --print-token)"
+fi
+say ""
 say "Useful commands:"
-say "  $BIN_PATH --config $CONFIG --check"
+say "  $BIN_PATH --config $CONFIG --check      verify files against the baseline"
+say "  $BIN_PATH --config $CONFIG --guard     port-scan guard status"
+say "  $BIN_PATH --config $CONFIG --unban IP  lift a guard ban"
+say "  $BIN_PATH --config $CONFIG --doctor    health checks"
 if command -v systemctl >/dev/null 2>&1 && [ "$PREFIX" = "/" ]; then
   say "  systemctl status $SERVICE_NAME"
   say "  journalctl -u $SERVICE_NAME -f"
