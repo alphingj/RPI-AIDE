@@ -54,9 +54,22 @@ Releases: https://github.com/alphingj/RPI-AIDE/releases
 Version `0.0.2` adds the port-scan guard, token login, scheduled and fast scans,
 real-time watch, notifications, severity levels, accepting changes, maintenance
 windows, a tamper-evident alert log, a doctor command, and Prometheus metrics.
-Upgrades keep the existing config and baseline; new settings take their defaults,
-so the guard starts in `monitor` mode and does not block anything until you switch
-it to `enforce`.
+Upgrades keep the existing config, baseline, and token; new settings take their
+defaults, so the guard starts in `monitor` mode and does not block anything until you
+switch it to `enforce`.
+
+### Upgrading from 0.0.1
+
+The one-command installer handles it: it keeps your config, baseline, and alerts,
+installs the new binary and service unit, and creates the login token next to the
+config if it is missing (then prints it once). Two things to know:
+
+- Kept 0.0.1 configs gain the new behavior through defaults, including the guard in
+  `monitor` mode. Nothing blocks until you say so.
+- If you later `--reconfigure` with the new default excludes (the three Pi-hole
+  working paths), the baseline pairing no longer matches the config, and the next
+  check asks for a re-init. Run `sudo rpi-aide-setup --reconfigure` and let it rebuild
+  the baseline, or `rpi-aide --init --force` yourself.
 
 ## What it does
 
@@ -65,10 +78,18 @@ it to `enforce`.
 - **Fast scans** reuse a cached hash when a file's size, mtime, ctime, inode, and mode
   are all unchanged, so repeat scans on a Pi Zero take seconds instead of a minute.
   A full rehash happens automatically at `full_scan_interval_secs` or on demand.
+  Measured on a real Pi Zero W: the full scan of 3,031 files (~520 MB) takes about
+  48 to 58 seconds; the fast scan of the same tree takes about 1.4 seconds with all
+  3,000+ hashes reused.
 - **Scheduled scans** run automatically after boot and then every `scan_interval_secs`
   with jitter, at lowered CPU priority so DNS is never delayed by a scan.
 - **Real-time watch** uses inotify on the configured watch paths and triggers a fast
   scan about two seconds after a change lands, rate-limited to one scan per minute.
+- **No repeat noise**: automatic scans only raise an alert when a difference is new or
+  has changed since the previous scan, and a bare mtime change with identical content,
+  size, mode, and type never alerts. A file that keeps changing reports each real
+  change once, not on every cycle. `--check` from the shell always reports the full
+  current difference set.
 - **Port-scan guard** watches inbound TCP SYNs on one interface. When a non-allowlisted
   source probes 3 or more distinct critical ports within 10 seconds (or enough ports
   with at least one critical, or 50 SYNs against critical ports), it records the event
@@ -174,10 +195,11 @@ The one-command installer is the setup wizard. It asks for:
    the Tailscale range; add your admin machine here so you cannot lock yourself out.
 
 It writes `config.json` with mode `0600`, creates `/var/lib/rpi-aide` with mode `0700`,
-creates the login token next to the config, excludes the Pi-hole databases, its own
-config and state directories, and volatile paths, creates the baseline, installs the
-systemd unit, and starts the service. If the baseline has scan errors, the installer
-says so and exits non-zero.
+creates the login token next to the config, excludes the Pi-hole databases and
+working files (list cache, gravity backups, the CLI password file that FTL rewrites),
+its own config and state directories, and volatile paths, creates the baseline,
+installs the systemd unit, and starts the service. If the baseline has scan errors,
+the installer says so and exits non-zero.
 
 For unattended setup, `--yes` accepts the defaults. Environment variables override the
 prompt defaults: `RPI_AIDE_ROOTS`, `RPI_AIDE_BIND`, `RPI_AIDE_MAX_MB`,
@@ -353,6 +375,9 @@ when `--config` is not used. Without that variable, a non-root process looks for
     "/etc/pihole/gravity.db-wal",
     "/etc/pihole/gravity.db-shm",
     "/etc/pihole/gravity_old.db",
+    "/etc/pihole/listsCache",
+    "/etc/pihole/gravity_backups",
+    "/etc/pihole/cli_pw",
     "/etc/rpi-aide",
     "/var/log",
     "/var/cache",
@@ -425,18 +450,28 @@ Notes:
 - `roots` must contain absolute paths. `/proc`, `/sys`, `/dev`, and `/run` are rejected
   as roots.
 - `exclude` entries are absolute. An entry excludes that path and everything below it.
+  The Pi-hole list cache, gravity backups, and `cli_pw` are excluded by default
+  because FTL rewrites them continuously; monitoring them produces a stream of
+  content-identical alerts under scheduled scanning.
 - `scan_interval_secs` of `0` disables scheduled scans; a boot scan still runs when
   `scan_on_start_delay_secs` is non-zero. Jitter is capped at the interval.
 - The fast-scan cache (`scan_cache.json`) binds each cached hash to the file's size,
   mode, mtime, ctime, and inode. A periodic full rehash is the safety net against
   forged metadata.
+- The difference signature map (`last_diff.json`) is what makes automatic scans
+  quiet: each current difference is fingerprinted, and an unchanged fingerprint does
+  not alert again. It is reset when the baseline is rebuilt.
 - `severity_rules` is a first-match list. Defaults mark authentication, sudo, systemd,
   cron, Pi-hole, DHCP, and boot paths critical; binaries and the rest of `/etc`
   warning. The dashboard port from `bind` is always treated as critical by the guard.
 - `guard.mode` can be changed at runtime from the dashboard or CLI; the change is
-  written back to the config file when one exists.
-- The guard state, the fast-scan cache, the accepted-change sidecar, the maintenance
-  window, and the chain head are all excluded from scans automatically.
+  written back to the config file. The service unit ships with
+  `ReadWritePaths=/var/lib/rpi-aide /etc/rpi-aide` for exactly this: the rest of the
+  filesystem stays read-only under `ProtectSystem=strict`, while the monitor can
+  still persist its own settings.
+- The guard state, the fast-scan cache, the difference map, the accepted-change
+  sidecar, the maintenance window, and the chain head are all excluded from scans
+  automatically.
 
 ## CLI
 
@@ -474,6 +509,8 @@ Exit codes:
 `--init` refuses to overwrite an existing baseline unless `--force` is passed.
 `--check` exits `1` when any path was added, modified, or deleted, or when a scan error
 occurred. The last scan summary is stored so the dashboard can show it after a restart.
+Unlike the automatic scans, `--check` always reports the full current difference set,
+even for differences the service already alerted on.
 
 ## Dashboard and API
 
@@ -517,18 +554,26 @@ blocks external scripts, images, fonts, and connections.
 - The alert log is hash-chained: each record links to the previous one, so silent
   edits inside the log fail `--verify-log`. An attacker with root can delete the
   whole chain, which the command reports honestly.
-- The monitor is read-only against the monitored roots. It only writes its state
-  directory.
+- The monitor is read-only against the monitored roots. It only writes its own state
+  directory and its config directory (for guard mode changes), and the service unit
+  keeps the rest of the filesystem read-only.
 - Hashing follows the file metadata captured before the read and checks size and mtime
   after the read. A file that changes during hashing is reported as an error instead
   of being recorded with mixed content.
 - Fast scans trust that unchanged size, mode, mtime, ctime, and inode mean unchanged
   content. Only root can attempt to forge those, and the periodic full rehash limits
   the window.
+- Alerts are deduplicated across automatic scans through a signature of each
+  difference, and a bare mtime change (identical content, size, mode, and type) is
+  treated as touch noise. Real changes still alert; `--check` from the shell always
+  reports the full current difference set.
 - The guard stores only source addresses, ports, counts, and timestamps. No packet
   payloads are retained.
 - The guard never changes the host's default firewall policy. It adds exactly one
   table (or tagged rules) that drops traffic from addresses it banned.
+- The service unit keeps the whole filesystem read-only (`ProtectSystem=strict`)
+  except the state directory and the RPI-AIDE config directory, so the monitor can
+  persist its own settings and nothing else.
 - The dashboard page has no third-party assets, analytics, or outbound requests.
 
 ## Resource profile
@@ -545,7 +590,15 @@ blocks external scripts, images, fonts, and connections.
 - The release profile is size-oriented: `opt-level = "z"`, LTO, one codegen unit,
   `panic = "abort"`, and symbols stripped.
 
-The x86_64 release binary is about 1.4 MB; the static ARMv6 musl binary is about 1.2 MB.
+The x86_64 release binary is about 1.6 MB; the static ARMv6 musl binary is about
+1.4 MB.
+
+Measured on a real Pi Zero W (single core, 426 MB RAM) with a 4,213-entry baseline
+covering ~520 MB: the full scan takes 48 to 58 seconds; a fast scan after it takes
+1.3 to 1.5 seconds and reuses about 3,050 cached hashes. A watch-triggered fast scan
+once a minute costs roughly 2% of one core. No Pi-hole DNS load benchmark was run;
+the niced scan thread and kernel-level packet filter are the mechanisms that keep
+scans out of the DNS fast path, not a measured latency claim.
 
 ## Tests and verification
 
@@ -558,18 +611,32 @@ cargo test
 The unit suite covers the scan tracker thresholds, the BPF filter through a tiny
 in-code interpreter checked against the userspace parser, packet parsing, the fast
 scan cache, the hash chain (clean, legacy, rotation, and tampering), accept flows
-including parent directory settling, maintenance windows, severity rules, config
-validation, session expiry and lockouts, command construction for nftables and
-iptables, and the CLI's JSON helpers.
+including parent directory settling, alert deduplication and bare-mtime suppression,
+maintenance windows, severity rules, config validation, session expiry and lockouts,
+command construction for nftables and iptables, and the CLI's JSON helpers. That is
+58 tests, alongside a 21-check installer suite, a 21-check CLI suite, and a 19-check
+Playwright dashboard suite.
 
-End-to-end checks were run against a live service and, for the guard, as root on a
-real Wi-Fi interface: an external port scan from another LAN device was detected,
-banned in an nftables set, verified to drop traffic, unbanned, re-banned at the repeat
-duration, and restored after a service restart. The installer suite covers fresh
-installs, upgrades that keep the token, and reconfigures with environment overrides.
-The dashboard suite drives login, the guard panel, severity badges and filters,
-accept, maintenance, scan, and logout in a real browser and checks the console stays
-clean.
+End-to-end checks were run twice against live services on real interfaces:
+
+- On a workstation with the guard in `enforce` on `wlan0`, an external port scan from
+  another LAN device was detected through the BPF-filtered capture, banned in an
+  nftables set, measured actually dropping the scanner's traffic, unbanned from the
+  CLI, re-banned at the repeat duration, and restored after a service restart.
+- On the production Pi Zero W itself, the same lifecycle was verified with a
+  temporary secondary source address: monitor-mode detection without blocking, an
+  enforce-mode 24-hour repeat ban (the guard remembered the source across
+  restarts), the allowlisted admin machine unaffected throughout, unban restoring
+  access, and Pi-hole DNS plus Tailscale unaffected.
+- The Pi deployment also exposed and fixed a duplicate-alert storm caused by
+  Pi-hole rewriting its working files every cycle; the fix (mtime-only suppression,
+  difference-signature deduplication, and the three new default excludes) is covered
+  by unit tests and verified in the Pi's journal, which now reports a clean
+  `0 added, 0 modified, 0 deleted` on every watch-triggered scan.
+- The installer suite covers fresh unattended installs, upgrades that keep the token
+  without reprinting it, and reconfigures with environment overrides. The dashboard
+  suite drives login, the guard panel, severity badges and filters, accept,
+  maintenance, scan, and logout in a real browser and checks the console stays clean.
 
 ## Repository layout
 
