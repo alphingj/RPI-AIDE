@@ -441,6 +441,7 @@ fi
 SYSTEMD_READY=0
 if [ "$PREFIX" = "/" ] && command -v systemctl >/dev/null 2>&1; then
   SYSTEMD_READY=1
+  CONFIG_DIR="$(dirname "$CONFIG")"
   say "Installing systemd service"
   install -d -m 0755 "$(dirname "$SERVICE_PATH")"
   cat > "$TMP/rpi-aide.service" <<EOF
@@ -470,7 +471,7 @@ ProtectKernelModules=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true
 LockPersonality=true
-ReadWritePaths=$STATE_DIR
+ReadWritePaths=$STATE_DIR $CONFIG_DIR
 
 SyslogIdentifier=$SERVICE_NAME
 
