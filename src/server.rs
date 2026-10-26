@@ -376,7 +376,7 @@ fn run_scan_sync(state: &Arc<AppState>, full: bool, trigger: &str) -> Result<Sca
         data.next_id
     };
 
-    let outcome = perform_check(&cfg, start_id, full, trigger)?;
+    let outcome = perform_check(&cfg, start_id, full, trigger, true)?;
 
     let (notifyable, summary) = {
         let mut data = state.inner.lock().expect("state lock");

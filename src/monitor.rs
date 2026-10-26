@@ -645,17 +645,21 @@ pub fn diff_entries(previous: &[Record], current: &[Record]) -> Vec<Detected> {
             }),
             Some(old) => {
                 let changes = changes_between(old, record);
-                if !changes.is_empty() {
-                    detected.push(Detected {
-                        kind: ChangeKind::Modified,
-                        path: record.path.clone(),
-                        changes,
-                        old_hash: old.hash.clone(),
-                        new_hash: record.hash.clone(),
-                        size: Some(record.size),
-                        mode: format_mode(record.mode),
-                    });
+                // A bare mtime move with identical content, size, mode, and
+                // type is touch noise; volatile working files produce a
+                // stream of these under scheduled scanning.
+                if changes.is_empty() || changes == ["mtime"] {
+                    continue;
                 }
+                detected.push(Detected {
+                    kind: ChangeKind::Modified,
+                    path: record.path.clone(),
+                    changes,
+                    old_hash: old.hash.clone(),
+                    new_hash: record.hash.clone(),
+                    size: Some(record.size),
+                    mode: format_mode(record.mode),
+                });
             }
         }
     }
@@ -674,6 +678,41 @@ pub fn diff_entries(previous: &[Record], current: &[Record]) -> Vec<Detected> {
 
     detected.sort_by(|left, right| left.path.cmp(&right.path));
     detected
+}
+
+/// A compact signature of one detected change, used to suppress re-reporting
+/// the same difference on every scheduled or watch-triggered scan.
+fn diff_signature(item: &Detected, expected: bool) -> String {
+    format!(
+        "{:?}|{}|{}|{}|{}|{}",
+        item.kind,
+        item.old_hash.as_deref().unwrap_or("-"),
+        item.new_hash.as_deref().unwrap_or("-"),
+        item.mode,
+        item.size.unwrap_or(0),
+        expected
+    )
+}
+
+pub type LastDiffMap = HashMap<String, String>;
+
+pub fn load_last_diff(cfg: &Config) -> LastDiffMap {
+    match std::fs::read(cfg.last_diff_path()) {
+        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
+        Err(_) => LastDiffMap::new(),
+    }
+}
+
+fn store_last_diff(cfg: &Config, diff: &LastDiffMap) {
+    if let Err(message) = write_json_atomic(&cfg.last_diff_path(), diff, 0o600) {
+        warn(&format!(
+            "could not store the diff signature map: {message}"
+        ));
+    }
+}
+
+fn clear_last_diff(cfg: &Config) {
+    let _ = std::fs::remove_file(cfg.last_diff_path());
 }
 
 pub fn changes_between(previous: &Record, current: &Record) -> Vec<String> {
@@ -761,6 +800,7 @@ pub fn perform_init(cfg: &Config, force: bool) -> Result<ScanSummary, String> {
     };
 
     write_json_atomic(&cfg.baseline_path, &baseline, 0o600)?;
+    clear_last_diff(cfg);
 
     if let Err(error) = write_cache(
         cfg,
@@ -807,6 +847,7 @@ pub fn perform_check(
     start_id: u64,
     full: bool,
     trigger: &str,
+    dedup: bool,
 ) -> Result<CheckOutcome, String> {
     let baseline = load_baseline(&cfg.baseline_path)?;
     if !baseline_matches_config(&baseline, cfg) {
@@ -817,6 +858,11 @@ pub fn perform_check(
     }
 
     let expected = maintenance_active(cfg).is_some();
+    let previous_diffs = if dedup {
+        load_last_diff(cfg)
+    } else {
+        LastDiffMap::new()
+    };
     let prior_cache = if full {
         None
     } else {
@@ -831,36 +877,50 @@ pub fn perform_check(
     let detected = diff_entries_scanned(&baseline.entries, &outcome.entries, &outcome.errors);
     let detected_at = now();
 
+    // Signatures of every current difference; only differences that are new
+    // or changed since the previous scan become alerts, so automatic scans
+    // do not re-report the same state every minute.
+    let mut current_diffs = LastDiffMap::new();
+    for item in &detected {
+        let signature = diff_signature(item, expected);
+        current_diffs.insert(item.path.clone(), signature);
+    }
+
+    let added = detected
+        .iter()
+        .filter(|item| item.kind == ChangeKind::Added)
+        .count();
+    let modified = detected
+        .iter()
+        .filter(|item| item.kind == ChangeKind::Modified)
+        .count();
+    let deleted = detected
+        .iter()
+        .filter(|item| item.kind == ChangeKind::Deleted)
+        .count();
+
     let mut next_id = start_id;
-    let mut alerts: Vec<Alert> = detected
-        .into_iter()
-        .map(|item| {
-            let mut alert = item.alert(next_id, detected_at, baseline.created_at);
-            alert.severity = crate::config::severity_for_path(&alert.path, &cfg.severity_rules);
-            alert.expected = expected;
-            next_id = next_id.saturating_add(1);
-            alert
-        })
-        .collect();
+    let mut alerts: Vec<Alert> = Vec::new();
+    for item in detected {
+        let fresh = !dedup || previous_diffs.get(&item.path) != current_diffs.get(&item.path);
+        if !fresh {
+            continue;
+        }
+        let mut alert = item.alert(next_id, detected_at, baseline.created_at);
+        alert.severity = crate::config::severity_for_path(&alert.path, &cfg.severity_rules);
+        alert.expected = expected;
+        alerts.push(alert);
+        next_id = next_id.saturating_add(1);
+    }
 
     let mut message = None;
     if let Err(error) = append_alerts(cfg, &mut alerts) {
         warn(&format!("could not persist alerts: {error}"));
         message = Some(format!("alerts were not written to disk: {error}"));
     }
-
-    let added = alerts
-        .iter()
-        .filter(|alert| alert.kind == ChangeKind::Added)
-        .count();
-    let modified = alerts
-        .iter()
-        .filter(|alert| alert.kind == ChangeKind::Modified)
-        .count();
-    let deleted = alerts
-        .iter()
-        .filter(|alert| alert.kind == ChangeKind::Deleted)
-        .count();
+    if dedup {
+        store_last_diff(cfg, &current_diffs);
+    }
 
     let summary = ScanSummary {
         started_at,
@@ -1923,6 +1983,9 @@ mod tests {
             "/etc/pihole/gravity.db-wal",
             "/etc/pihole/gravity.db-shm",
             "/etc/pihole/gravity_old.db",
+            "/etc/pihole/listsCache",
+            "/etc/pihole/gravity_backups",
+            "/etc/pihole/cli_pw",
             "/etc/rpi-aide",
         ] {
             assert!(
@@ -1930,6 +1993,71 @@ mod tests {
                 "default excludes must include {path}"
             );
         }
+    }
+
+    #[test]
+    fn bare_mtime_changes_do_not_become_alerts() {
+        let base = temp_dir("mtime");
+        let cfg = test_config(&base);
+        let root = base.join("root");
+        write_file(&root.join("a.conf"), "stable");
+        perform_init(&cfg, false).expect("init");
+
+        let outcome = perform_check(&cfg, 1, false, "manual", false).expect("check");
+        assert!(outcome.summary.ok, "no changes yet");
+
+        // Touch the file: same content, new mtime.
+        let path = root.join("a.conf");
+        let metadata = fs::metadata(&path).expect("stat");
+        let new_mtime = metadata.mtime() + 100;
+        let times = libc::timeval {
+            tv_sec: new_mtime,
+            tv_usec: 0,
+        };
+        let times_ref = [times, times];
+        let cpath = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+        unsafe {
+            libc::utimes(cpath.as_ptr(), times_ref.as_ptr());
+        }
+        let outcome = perform_check(&cfg, 10, false, "manual", false).expect("check after touch");
+        assert!(
+            outcome.summary.ok,
+            "a bare mtime move is touch noise and must not alert"
+        );
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn automatic_scans_do_not_repeat_the_same_difference() {
+        let base = temp_dir("dedup");
+        let cfg = test_config(&base);
+        let root = base.join("root");
+        write_file(&root.join("a.conf"), "one");
+        perform_init(&cfg, false).expect("init");
+
+        write_file(&root.join("a.conf"), "two");
+        let first = perform_check(&cfg, 1, false, "scheduled", true).expect("first scan");
+        assert_eq!(first.summary.modified, 1);
+        assert_eq!(first.alerts.len(), 1, "the first sighting reports");
+
+        // The same difference on the next scan is not a new alert...
+        let second = perform_check(&cfg, 10, false, "scheduled", true).expect("second scan");
+        assert_eq!(second.summary.modified, 1, "the state is still dirty");
+        assert!(second.alerts.is_empty(), "but it does not re-alert");
+
+        // ...a genuinely new change does.
+        write_file(&root.join("a.conf"), "three");
+        let third = perform_check(&cfg, 20, false, "scheduled", true).expect("third scan");
+        assert_eq!(third.alerts.len(), 1, "new content reports again");
+
+        // Accepting the change clears the difference entirely.
+        accept_path(&cfg, &root.join("a.conf")).expect("accept");
+        let fourth = perform_check(&cfg, 30, false, "scheduled", true).expect("fourth scan");
+        assert!(fourth.summary.ok);
+        assert!(fourth.alerts.is_empty());
+
+        let _ = fs::remove_dir_all(&base);
     }
 
     // -----------------------------------------------------------------------
@@ -1967,7 +2095,7 @@ mod tests {
         assert_eq!(outcome.stats.hashed, 1);
 
         // The alert appears in a fast check and disappears after accepting.
-        let outcome = perform_check(&cfg, 1, false, "watch").expect("check");
+        let outcome = perform_check(&cfg, 1, false, "manual", false).expect("check");
         assert_eq!(outcome.summary.added + outcome.summary.modified, 1);
         assert_eq!(outcome.summary.files_reused, 1);
 
@@ -2104,13 +2232,13 @@ mod tests {
         perform_init(&cfg, false).expect("init");
 
         write_file(&root.join("edit.conf"), "two");
-        let outcome = perform_check(&cfg, 1, false, "manual").expect("check");
+        let outcome = perform_check(&cfg, 1, false, "manual", false).expect("check");
         assert_eq!(outcome.summary.modified, 1);
 
         let report = accept_path(&cfg, &root.join("edit.conf")).expect("accept");
         assert_eq!(report.action, "updated");
 
-        let outcome = perform_check(&cfg, 10, false, "manual").expect("check after accept");
+        let outcome = perform_check(&cfg, 10, false, "manual", false).expect("check after accept");
         assert_eq!(
             outcome.summary.added + outcome.summary.modified + outcome.summary.deleted,
             0
@@ -2134,15 +2262,15 @@ mod tests {
         fs::remove_file(root.join("doomed.conf")).expect("remove file");
         let report = accept_path(&cfg, &root.join("doomed.conf")).expect("accept deletion");
         assert_eq!(report.action, "removed");
-        let outcome = perform_check(&cfg, 1, false, "manual").expect("check");
+        let outcome = perform_check(&cfg, 1, false, "manual", false).expect("check");
         assert_eq!(outcome.summary.deleted, 0);
 
         write_file(&root.join("fresh.conf"), "brand new");
-        let outcome = perform_check(&cfg, 10, false, "manual").expect("check with addition");
+        let outcome = perform_check(&cfg, 10, false, "manual", false).expect("check with addition");
         assert_eq!(outcome.summary.added, 1);
         let report = accept_path(&cfg, &root.join("fresh.conf")).expect("accept addition");
         assert_eq!(report.action, "recorded");
-        let outcome = perform_check(&cfg, 20, false, "manual").expect("clean check");
+        let outcome = perform_check(&cfg, 20, false, "manual", false).expect("clean check");
         assert!(
             outcome.summary.ok,
             "accepting a new file must also settle the parent directory mtime"
@@ -2173,7 +2301,7 @@ mod tests {
         write_file(&root.join("a.conf"), "a");
         perform_init(&cfg, false).expect("init");
         write_file(&root.join("a.conf"), "b");
-        let outcome = perform_check(&cfg, 1, false, "manual").expect("check");
+        let outcome = perform_check(&cfg, 1, false, "manual", false).expect("check");
         let alert = outcome.alerts[0].clone();
 
         accept_path(&cfg, &root.join("a.conf")).expect("accept");
@@ -2221,7 +2349,7 @@ mod tests {
 
         set_maintenance(&cfg, 10, "test window").expect("set");
         write_file(&root.join("a.conf"), "b");
-        let outcome = perform_check(&cfg, 1, false, "manual").expect("check");
+        let outcome = perform_check(&cfg, 1, false, "manual", false).expect("check");
         assert_eq!(outcome.alerts.len(), 1);
         assert!(outcome.alerts[0].expected);
 

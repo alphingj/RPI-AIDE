@@ -395,6 +395,9 @@ impl Default for Config {
                 "/etc/pihole/gravity.db-wal",
                 "/etc/pihole/gravity.db-shm",
                 "/etc/pihole/gravity_old.db",
+                "/etc/pihole/listsCache",
+                "/etc/pihole/gravity_backups",
+                "/etc/pihole/cli_pw",
                 "/etc/rpi-aide",
                 "/var/log",
                 "/var/cache",
@@ -570,6 +573,12 @@ impl Config {
         path
     }
 
+    pub fn last_diff_path(&self) -> PathBuf {
+        let mut path = self.baseline_path.clone();
+        path.set_file_name("last_diff.json");
+        path
+    }
+
     pub fn chain_head_path(&self) -> PathBuf {
         let mut path = self.alerts_path.clone();
         path.set_file_name("chain_head.json");
@@ -622,6 +631,7 @@ pub fn effective_excludes(cfg: &Config) -> Vec<PathBuf> {
         &cfg.alerts_path,
         &cfg.last_scan_path(),
         &cfg.cache_path(),
+        &cfg.last_diff_path(),
         &cfg.chain_head_path(),
         &cfg.accepted_path(),
         &cfg.maintenance_path(),

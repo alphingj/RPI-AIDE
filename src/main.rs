@@ -249,7 +249,7 @@ async fn run() -> Result<i32, String> {
                 return Err("no config or baseline found; run 'rpi-aide --init' first".to_string());
             }
             let next_id = monitor::next_alert_id(&cfg);
-            let outcome = monitor::perform_check(&cfg, next_id, !fast, "manual")?;
+            let outcome = monitor::perform_check(&cfg, next_id, !fast, "manual", false)?;
             monitor::print_check(&outcome);
             Ok(if outcome.summary.ok { 0 } else { 1 })
         }
