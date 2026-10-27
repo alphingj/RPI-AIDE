@@ -963,7 +963,7 @@
             <div class="fact"><dt>Next scan</dt><dd id="factNextScan">Not scheduled</dd></div>
             <div class="fact"><dt>Watch</dt><dd id="factWatch">Not available</dd></div>
             <div class="fact"><dt>Guard</dt><dd id="factGuard">Not available</dd></div>
-            <div class="fact"><dt>Notifications</dt><dd id="factNotify">Not configured</dd></div>
+            <div class="fact"><dt>Notifications</dt><dd id="factNotify"><span id="factNotifyText">Not configured</span></dd> <button class="button ghost small" type="button" id="testNotify" title="Send a test notification">Test</button></div>
             <div class="fact"><dt>Auth</dt><dd id="factAuth">Enabled</dd></div>
             <div class="fact"><dt>Config</dt><dd id="factConfig" class="mono">Unknown</dd></div>
           </dl>
@@ -1455,7 +1455,7 @@
       ? guard.mode + (guard.capture_running ? " · listening" : " · not listening")
       : "Not available");
 
-    setText("factNotify", status.notify && status.notify.configured
+    setText("factNotifyText", status.notify && status.notify.configured
       ? (status.notify.channels || []).join(", ") + (status.notify.last_error ? " · last error" : "")
       : "Not configured");
 
@@ -1815,6 +1815,20 @@
     }
   }
 
+  function testNotify() {
+    doAction("/api/notify/test", {})
+      .then(function () {
+        state.error = null;
+        renderBanner(state.status || {});
+        schedule(700);
+      })
+      .catch(function (error) {
+        state.error = error && error.message ? error.message : "The test notification could not be sent.";
+        renderBanner(state.status || {});
+        schedule(3000);
+      });
+  }
+
   function logout() {
     fetchJson("/logout", { method: "POST" })
       .catch(function () { null; })
@@ -1856,6 +1870,10 @@
       button.addEventListener("click", function () {
         setMaintenance(button.dataset.maintenance);
       });
+    });
+
+    byId("testNotify").addEventListener("click", function () {
+      testNotify();
     });
 
     document.addEventListener("visibilitychange", function () {

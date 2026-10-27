@@ -1,6 +1,6 @@
 [package]
 name = "rpi-aide"
-version = "0.0.2"
+version = "0.0.3"
 edition = "2021"
 description = "Lightweight file integrity monitor with a port-scan guard and an embedded dashboard for small Linux hosts"
 license = "MIT"

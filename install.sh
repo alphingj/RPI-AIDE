@@ -47,6 +47,8 @@ Environment overrides for unattended installs:
   RPI_AIDE_NOTIFY_URL    webhook or ntfy URL for alert delivery
   RPI_AIDE_GUARD_MODE    monitor, enforce or off
   RPI_AIDE_GUARD_ALLOW   space separated allowlisted IPs or CIDRs
+  RPI_AIDE_TELEGRAM_BOT_TOKEN   telegram bot token for alert delivery
+  RPI_AIDE_TELEGRAM_CHAT_ID     telegram chat id to receive alerts
 EOF
 }
 
@@ -301,6 +303,22 @@ else
       ;;
   esac
 
+  TELEGRAM_TOKEN="$(ask "Telegram bot token for alerts (empty skips)" "${RPI_AIDE_TELEGRAM_BOT_TOKEN:-}")"
+  TELEGRAM_CHAT="$(ask "Telegram chat id (empty skips)" "${RPI_AIDE_TELEGRAM_CHAT_ID:-}")"
+  TELEGRAM_BOT_TOKEN="null"
+  TELEGRAM_CHAT_ID="null"
+  case "$TELEGRAM_TOKEN" in
+    "") ;;
+    *)
+      if [ -z "$TELEGRAM_CHAT" ]; then
+        warn "telegram bot token set without a chat id; telegram delivery is disabled"
+      else
+        TELEGRAM_BOT_TOKEN="\"$(json_escape "$TELEGRAM_TOKEN")\""
+        TELEGRAM_CHAT_ID="\"$(json_escape "$TELEGRAM_CHAT")\""
+      fi
+      ;;
+  esac
+
   GUARD_MODE="$(ask "Port-scan guard mode: monitor, enforce or off" "${RPI_AIDE_GUARD_MODE:-monitor}")"
   case "$GUARD_MODE" in
     monitor|enforce|off) ;;
@@ -360,6 +378,8 @@ else
     printf ',\n  "full_scan_interval_secs": 86400'
     printf ',\n  "notify": {\n    "webhook_url": %s' "$NOTIFY_WEBHOOK"
     printf ',\n    "ntfy_url": %s' "$NOTIFY_NTFY"
+    printf ',\n    "telegram_bot_token": %s' "$TELEGRAM_BOT_TOKEN"
+    printf ',\n    "telegram_chat_id": %s' "$TELEGRAM_CHAT_ID"
     printf ',\n    "min_severity": "info"'
     printf ',\n    "on_guard_events": true'
     printf ',\n    "timeout_secs": 5'
